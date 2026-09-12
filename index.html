@@ -22,32 +22,88 @@
   #connBanner.stale{background:#530;color:#fc8;}
   #connBanner.error{background:#500;color:#f88;}
   #lastUpdated{font-size:0.75em;color:#666;margin-top:10px;}
+
+  #loginScreen{max-width:340px;margin:15vh auto 0;text-align:center;}
+  #loginScreen h1{font-size:1.4em;}
+  #loginScreen .field{margin:10px 0;text-align:left;}
+  #loginScreen label{display:block;font-size:0.8em;color:#aaa;margin-bottom:4px;}
+  #loginScreen input{width:100%;box-sizing:border-box;padding:10px;border-radius:6px;border:1px solid #333;background:#1c1c1c;color:#eee;font-size:1em;}
+  #loginBtn{width:100%;margin-top:12px;padding:11px;border-radius:6px;border:none;background:#2b6;color:#fff;font-size:1em;cursor:pointer;}
+  #loginBtn:active{background:#1e5;}
+  #loginError{color:#f88;font-size:0.85em;margin-top:10px;min-height:1.2em;}
+  #logoutBtn{background:#333;color:#eee;border:none;border-radius:6px;padding:6px 12px;font-size:0.8em;cursor:pointer;float:right;}
+  [hidden]{display:none!important;}
 </style>
 </head>
 <body>
-<h1>🛰️ Drone Remote ID Sniffer</h1>
-<div class="sub">Live status, pushed over cellular — refreshes every 10s</div>
 
-<div id="connBanner" class="stale">Loading...</div>
-
-<div class="card">
-  <div class="stat"><span>Beacons seen</span><span id="beacons">-</span></div>
-  <div class="stat"><span>Vendor IEs</span><span id="vendorIEs">-</span></div>
-  <div class="stat"><span>Unknown OUIs</span><span id="unknownOUIs">-</span></div>
+<div id="loginScreen">
+  <h1>🛰️ Drone Sniffer</h1>
+  <div class="sub">Sign in to view live status</div>
+  <div class="field"><label>Email</label><input id="loginEmail" type="email" autocomplete="username"></div>
+  <div class="field"><label>Password</label><input id="loginPassword" type="password" autocomplete="current-password"></div>
+  <button id="loginBtn">Sign In</button>
+  <div id="loginError"></div>
 </div>
 
-<div class="card" id="droneCard"><span class="none">No drone detected yet</span></div>
-<div class="card" id="operatorCard"><span class="none">No operator location yet</span></div>
-<div class="card" id="snifferGpsCard"><span class="none">No sniffer GPS fix yet</span></div>
+<div id="dashboard" hidden>
+  <button id="logoutBtn">Sign out</button>
+  <h1>🛰️ Drone Remote ID Sniffer</h1>
+  <div class="sub">Live status, pushed over cellular — refreshes every 10s</div>
 
-<div id="lastUpdated"></div>
+  <div id="connBanner" class="stale">Loading...</div>
 
+  <div class="card">
+    <div class="stat"><span>Beacons seen</span><span id="beacons">-</span></div>
+    <div class="stat"><span>Vendor IEs</span><span id="vendorIEs">-</span></div>
+    <div class="stat"><span>Unknown OUIs</span><span id="unknownOUIs">-</span></div>
+  </div>
+
+  <div class="card" id="droneCard"><span class="none">No drone detected yet</span></div>
+  <div class="card" id="operatorCard"><span class="none">No operator location yet</span></div>
+  <div class="card" id="snifferGpsCard"><span class="none">No sniffer GPS fix yet</span></div>
+
+  <div id="lastUpdated"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
 <script>
-// Backend endpoint path includes a per-deployment identifier that the
-// backend's access rules key off. Treat this page's own URL as the
-// thing to keep unshared/unlisted, since the identifier is visible in
-// this page's source to anyone who loads it.
-const BACKEND_URL = "https://drone-sniffer-telemetry-default-rtdb.firebaseio.com/devices/3a774835207cfb2cb587a26af3ed84b69e6efc10/status.json";
+// This is the standard public Firebase Web SDK config — it identifies
+// the project but is not a secret; access control is enforced by the
+// database security rules (auth required) and by requiring sign-in
+// with an account that actually exists in this project.
+firebase.initializeApp({
+  apiKey: "AIzaSyAcBCg1gy7FZJVUp3D-NQKEj3k56h6dhtE",
+  authDomain: "drone-sniffer-telemetry.firebaseapp.com",
+  databaseURL: "https://drone-sniffer-telemetry-default-rtdb.firebaseio.com",
+  projectId: "drone-sniffer-telemetry"
+});
+
+// The exact device path the ESP32 pushes to — still an unguessable
+// segment, now layered underneath a real login rather than being the
+// only protection.
+const DEVICE_PATH = "devices/3a774835207cfb2cb587a26af3ed84b69e6efc10/status.json";
+
+const loginScreen = document.getElementById('loginScreen');
+const dashboard = document.getElementById('dashboard');
+const loginError = document.getElementById('loginError');
+
+document.getElementById('loginBtn').addEventListener('click', async () => {
+  loginError.textContent = '';
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  try {
+    await firebase.auth().signInWithEmailAndPassword(email, password);
+  } catch (e) {
+    loginError.textContent = 'Sign-in failed: ' + e.message;
+  }
+});
+
+document.getElementById('logoutBtn').addEventListener('click', () => {
+  firebase.auth().signOut();
+});
 
 function ago(sec) {
   if (sec < 60) return sec + 's ago';
@@ -59,69 +115,78 @@ function mapLink(lat, lon) {
   return `<a class="maplink" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}">View on map ↗</a>`;
 }
 
-async function poll() {
+function render(d) {
   const banner = document.getElementById('connBanner');
-  try {
-    const r = await fetch(BACKEND_URL, {cache: 'no-store'});
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const d = await r.json();
-    if (!d) {
-      banner.className = 'stale';
-      banner.textContent = 'No data received from the device yet.';
-      return;
-    }
-
-    document.getElementById('beacons').textContent = d.beacons ?? '-';
-    document.getElementById('vendorIEs').textContent = d.vendorIEs ?? '-';
-    document.getElementById('unknownOUIs').textContent = d.unknownOUIs ?? '-';
-
-    const dc = document.getElementById('droneCard');
-    if (d.drone && d.drone.valid) {
-      dc.innerHTML = `<span class="badge">Drone</span> &nbsp; <b>${d.drone.id || ''}</b>
-        <div class="row">Lat: ${d.drone.lat}</div>
-        <div class="row">Lon: ${d.drone.lon}</div>
-        <div class="row">Alt: ${d.drone.alt} m</div>
-        <div class="row">${mapLink(d.drone.lat, d.drone.lon)}</div>
-        <div class="row" style="color:#888">Last seen ${ago(d.drone.ageSec || 0)}</div>`;
-    } else {
-      dc.innerHTML = '<span class="none">No drone detected yet</span>';
-    }
-
-    const oc = document.getElementById('operatorCard');
-    if (d.operator && d.operator.valid) {
-      oc.innerHTML = `<span class="badge operator">Operator</span>
-        <div class="row">Lat: ${d.operator.lat}</div>
-        <div class="row">Lon: ${d.operator.lon}</div>
-        <div class="row">${mapLink(d.operator.lat, d.operator.lon)}</div>
-        <div class="row" style="color:#888">Last seen ${ago(d.operator.ageSec || 0)}</div>`;
-    } else {
-      oc.innerHTML = '<span class="none">No operator location yet</span>';
-    }
-
-    const sc = document.getElementById('snifferGpsCard');
-    if (d.snifferGps && d.snifferGps.valid) {
-      sc.innerHTML = `<span class="badge sniffer">Sniffer</span>
-        <div class="row">Lat: ${d.snifferGps.lat}</div>
-        <div class="row">Lon: ${d.snifferGps.lon}</div>
-        <div class="row">Alt: ${d.snifferGps.alt} m</div>
-        <div class="row">${mapLink(d.snifferGps.lat, d.snifferGps.lon)}</div>
-        <div class="row" style="color:#888">Fix age ${ago(d.snifferGps.ageSec || 0)}</div>`;
-    } else {
-      sc.innerHTML = '<span class="none">No sniffer GPS fix yet</span>';
-    }
-
-    document.getElementById('lastUpdated').textContent = 'Device uptime at last push: ' + Math.floor((d.updatedAtMs || 0) / 1000) + 's';
-
-    banner.className = 'ok';
-    banner.textContent = 'Connected — receiving live data from the device.';
-  } catch (e) {
-    banner.className = 'error';
-    banner.textContent = 'Could not reach the telemetry backend: ' + e.message;
+  if (!d) {
+    banner.className = 'stale';
+    banner.textContent = 'No data received from the device yet.';
+    return;
   }
+
+  document.getElementById('beacons').textContent = d.beacons ?? '-';
+  document.getElementById('vendorIEs').textContent = d.vendorIEs ?? '-';
+  document.getElementById('unknownOUIs').textContent = d.unknownOUIs ?? '-';
+
+  const dc = document.getElementById('droneCard');
+  if (d.drone && d.drone.valid) {
+    dc.innerHTML = `<span class="badge">Drone</span> &nbsp; <b>${d.drone.id || ''}</b>
+      <div class="row">Lat: ${d.drone.lat}</div>
+      <div class="row">Lon: ${d.drone.lon}</div>
+      <div class="row">Alt: ${d.drone.alt} m</div>
+      <div class="row">${mapLink(d.drone.lat, d.drone.lon)}</div>
+      <div class="row" style="color:#888">Last seen ${ago(d.drone.ageSec || 0)}</div>`;
+  } else {
+    dc.innerHTML = '<span class="none">No drone detected yet</span>';
+  }
+
+  const oc = document.getElementById('operatorCard');
+  if (d.operator && d.operator.valid) {
+    oc.innerHTML = `<span class="badge operator">Operator</span>
+      <div class="row">Lat: ${d.operator.lat}</div>
+      <div class="row">Lon: ${d.operator.lon}</div>
+      <div class="row">${mapLink(d.operator.lat, d.operator.lon)}</div>
+      <div class="row" style="color:#888">Last seen ${ago(d.operator.ageSec || 0)}</div>`;
+  } else {
+    oc.innerHTML = '<span class="none">No operator location yet</span>';
+  }
+
+  const sc = document.getElementById('snifferGpsCard');
+  if (d.snifferGps && d.snifferGps.valid) {
+    sc.innerHTML = `<span class="badge sniffer">Sniffer</span>
+      <div class="row">Lat: ${d.snifferGps.lat}</div>
+      <div class="row">Lon: ${d.snifferGps.lon}</div>
+      <div class="row">Alt: ${d.snifferGps.alt} m</div>
+      <div class="row">${mapLink(d.snifferGps.lat, d.snifferGps.lon)}</div>
+      <div class="row" style="color:#888">Fix age ${ago(d.snifferGps.ageSec || 0)}</div>`;
+  } else {
+    sc.innerHTML = '<span class="none">No sniffer GPS fix yet</span>';
+  }
+
+  document.getElementById('lastUpdated').textContent = 'Device uptime at last push: ' + Math.floor((d.updatedAtMs || 0) / 1000) + 's';
+  banner.className = 'ok';
+  banner.textContent = 'Connected — receiving live data from the device.';
 }
 
-poll();
-setInterval(poll, 10000);
+let dbRef = null;
+firebase.auth().onAuthStateChanged(user => {
+  if (user) {
+    loginScreen.hidden = true;
+    dashboard.hidden = false;
+    if (!dbRef) {
+      dbRef = firebase.database().ref(DEVICE_PATH);
+      dbRef.on('value', snap => render(snap.val()),
+        err => {
+          const banner = document.getElementById('connBanner');
+          banner.className = 'error';
+          banner.textContent = 'Could not reach the telemetry backend: ' + err.message;
+        });
+    }
+  } else {
+    loginScreen.hidden = false;
+    dashboard.hidden = true;
+    if (dbRef) { dbRef.off(); dbRef = null; }
+  }
+});
 </script>
 </body>
 </html>
