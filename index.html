@@ -143,12 +143,32 @@ function mapLink(lat, lon) {
   return `<a class="maplink" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}">View on map ↗</a>`;
 }
 
+// Firebase's live listener only fires when the underlying data
+// CHANGES — if the device goes offline, no new snapshot ever arrives,
+// so the page would otherwise keep showing whatever the last
+// successful push said forever, including a stale "Connected" banner.
+// serverUpdatedAt is a Firebase-server-assigned timestamp (not the
+// device's own clock, which resets every reboot), so elapsed time
+// since it can be trusted to detect a real disconnect even with no
+// new events — re-checked on its own timer below, not just on push.
+const STALE_AFTER_MS = 150 * 1000;  // 2.5x the device's 60s push interval
+let lastReceivedData = null;
+
 function render(d) {
+  lastReceivedData = d;
   const banner = document.getElementById('connBanner');
   if (!d) {
     banner.className = 'stale';
     banner.textContent = 'No data received from the device yet.';
     return;
+  }
+
+  const ageMs = d.serverUpdatedAt ? (Date.now() - d.serverUpdatedAt) : null;
+  if (ageMs !== null && ageMs > STALE_AFTER_MS) {
+    banner.className = 'stale';
+    const ageMin = Math.floor(ageMs / 60000);
+    banner.textContent = 'Device appears offline — last update was ' +
+      (ageMin < 1 ? 'under a minute' : ageMin + ' minute' + (ageMin === 1 ? '' : 's')) + ' ago.';
   }
 
   document.getElementById('beacons').textContent = d.beacons ?? '-';
@@ -203,9 +223,18 @@ function render(d) {
   }
 
   document.getElementById('lastUpdated').textContent = 'Device uptime at last push: ' + Math.floor((d.updatedAtMs || 0) / 1000) + 's';
-  banner.className = 'ok';
-  banner.textContent = 'Connected — receiving live data from the device.';
+  if (ageMs === null || ageMs <= STALE_AFTER_MS) {
+    banner.className = 'ok';
+    banner.textContent = 'Connected — receiving live data from the device.';
+  }
+  // else: the offline banner set above stays in place.
 }
+
+// Re-check staleness on our own timer, independent of new Firebase
+// events — a device that's gone offline sends no new snapshot at all,
+// so without this the banner would never update past whatever it said
+// at the moment the connection was lost.
+setInterval(() => { if (lastReceivedData) render(lastReceivedData); }, 15000);
 
 let dbRef = null;
 firebase.auth().onAuthStateChanged(user => {
