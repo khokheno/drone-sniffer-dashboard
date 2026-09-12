@@ -84,7 +84,7 @@ firebase.initializeApp({
 // The exact device path the ESP32 pushes to — still an unguessable
 // segment, now layered underneath a real login rather than being the
 // only protection.
-const DEVICE_PATH = "devices/3a774835207cfb2cb587a26af3ed84b69e6efc10/status.json";
+const DEVICE_PATH = "devices/3a774835207cfb2cb587a26af3ed84b69e6efc10/status";
 
 const loginScreen = document.getElementById('loginScreen');
 const dashboard = document.getElementById('dashboard');
@@ -173,13 +173,19 @@ firebase.auth().onAuthStateChanged(user => {
     loginScreen.hidden = true;
     dashboard.hidden = false;
     if (!dbRef) {
-      dbRef = firebase.database().ref(DEVICE_PATH);
-      dbRef.on('value', snap => render(snap.val()),
-        err => {
-          const banner = document.getElementById('connBanner');
-          banner.className = 'error';
-          banner.textContent = 'Could not reach the telemetry backend: ' + err.message;
-        });
+      try {
+        dbRef = firebase.database().ref(DEVICE_PATH);
+        dbRef.on('value', snap => render(snap.val()),
+          err => {
+            const banner = document.getElementById('connBanner');
+            banner.className = 'error';
+            banner.textContent = 'Could not reach the telemetry backend: ' + err.message;
+          });
+      } catch (e) {
+        const banner = document.getElementById('connBanner');
+        banner.className = 'error';
+        banner.textContent = 'Setup error: ' + e.message;
+      }
     }
   } else {
     loginScreen.hidden = false;
