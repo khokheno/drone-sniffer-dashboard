@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drone Sniffer — Live Dashboard</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#111;color:#eee;margin:0;padding:16px;min-height:100vh;box-sizing:border-box;}
+  h1{font-size:1.3em;margin:0 0 4px;}
+  .sub{color:#888;font-size:0.85em;margin-bottom:16px;}
+  .card{background:#1c1c1c;border-radius:10px;padding:14px;margin-bottom:12px;max-width:480px;}
+  .stat{display:flex;justify-content:space-between;margin:4px 0;font-size:0.9em;color:#aaa;}
+  .row{margin:4px 0;}
+  .badge{display:inline-block;padding:2px 8px;border-radius:12px;background:#2b6;color:#fff;font-size:0.75em;}
+  .badge.operator{background:#28c;}
+  .badge.sniffer{background:#a62;}
+  .none{color:#888;font-style:italic;}
+  a.maplink{color:#6cf;font-size:0.85em;text-decoration:none;}
+  a.maplink:hover{text-decoration:underline;}
+  #connBanner{max-width:480px;padding:10px 14px;border-radius:8px;margin-bottom:14px;font-size:0.85em;}
+  #connBanner.ok{background:#163;color:#8f8;}
+  #connBanner.stale{background:#530;color:#fc8;}
+  #connBanner.error{background:#500;color:#f88;}
+  #lastUpdated{font-size:0.75em;color:#666;margin-top:10px;}
+</style>
+</head>
+<body>
+<h1>🛰️ Drone Remote ID Sniffer</h1>
+<div class="sub">Live status, pushed over cellular — refreshes every 10s</div>
+
+<div id="connBanner" class="stale">Loading...</div>
+
+<div class="card">
+  <div class="stat"><span>Beacons seen</span><span id="beacons">-</span></div>
+  <div class="stat"><span>Vendor IEs</span><span id="vendorIEs">-</span></div>
+  <div class="stat"><span>Unknown OUIs</span><span id="unknownOUIs">-</span></div>
+</div>
+
+<div class="card" id="droneCard"><span class="none">No drone detected yet</span></div>
+<div class="card" id="operatorCard"><span class="none">No operator location yet</span></div>
+<div class="card" id="snifferGpsCard"><span class="none">No sniffer GPS fix yet</span></div>
+
+<div id="lastUpdated"></div>
+
+<script>
+// Backend endpoint path includes a per-deployment identifier that the
+// backend's access rules key off. Treat this page's own URL as the
+// thing to keep unshared/unlisted, since the identifier is visible in
+// this page's source to anyone who loads it.
+const BACKEND_URL = "https://drone-sniffer-telemetry-default-rtdb.firebaseio.com/devices/3a774835207cfb2cb587a26af3ed84b69e6efc10/status.json";
+
+function ago(sec) {
+  if (sec < 60) return sec + 's ago';
+  if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+  return Math.floor(sec / 3600) + 'h ago';
+}
+
+function mapLink(lat, lon) {
+  return `<a class="maplink" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}">View on map ↗</a>`;
+}
+
+async function poll() {
+  const banner = document.getElementById('connBanner');
+  try {
+    const r = await fetch(BACKEND_URL, {cache: 'no-store'});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    if (!d) {
+      banner.className = 'stale';
+      banner.textContent = 'No data received from the device yet.';
+      return;
+    }
+
+    document.getElementById('beacons').textContent = d.beacons ?? '-';
+    document.getElementById('vendorIEs').textContent = d.vendorIEs ?? '-';
+    document.getElementById('unknownOUIs').textContent = d.unknownOUIs ?? '-';
+
+    const dc = document.getElementById('droneCard');
+    if (d.drone && d.drone.valid) {
+      dc.innerHTML = `<span class="badge">Drone</span> &nbsp; <b>${d.drone.id || ''}</b>
+        <div class="row">Lat: ${d.drone.lat}</div>
+        <div class="row">Lon: ${d.drone.lon}</div>
+        <div class="row">Alt: ${d.drone.alt} m</div>
+        <div class="row">${mapLink(d.drone.lat, d.drone.lon)}</div>
+        <div class="row" style="color:#888">Last seen ${ago(d.drone.ageSec || 0)}</div>`;
+    } else {
+      dc.innerHTML = '<span class="none">No drone detected yet</span>';
+    }
+
+    const oc = document.getElementById('operatorCard');
+    if (d.operator && d.operator.valid) {
+      oc.innerHTML = `<span class="badge operator">Operator</span>
+        <div class="row">Lat: ${d.operator.lat}</div>
+        <div class="row">Lon: ${d.operator.lon}</div>
+        <div class="row">${mapLink(d.operator.lat, d.operator.lon)}</div>
+        <div class="row" style="color:#888">Last seen ${ago(d.operator.ageSec || 0)}</div>`;
+    } else {
+      oc.innerHTML = '<span class="none">No operator location yet</span>';
+    }
+
+    const sc = document.getElementById('snifferGpsCard');
+    if (d.snifferGps && d.snifferGps.valid) {
+      sc.innerHTML = `<span class="badge sniffer">Sniffer</span>
+        <div class="row">Lat: ${d.snifferGps.lat}</div>
+        <div class="row">Lon: ${d.snifferGps.lon}</div>
+        <div class="row">Alt: ${d.snifferGps.alt} m</div>
+        <div class="row">${mapLink(d.snifferGps.lat, d.snifferGps.lon)}</div>
+        <div class="row" style="color:#888">Fix age ${ago(d.snifferGps.ageSec || 0)}</div>`;
+    } else {
+      sc.innerHTML = '<span class="none">No sniffer GPS fix yet</span>';
+    }
+
+    document.getElementById('lastUpdated').textContent = 'Device uptime at last push: ' + Math.floor((d.updatedAtMs || 0) / 1000) + 's';
+
+    banner.className = 'ok';
+    banner.textContent = 'Connected — receiving live data from the device.';
+  } catch (e) {
+    banner.className = 'error';
+    banner.textContent = 'Could not reach the telemetry backend: ' + e.message;
+  }
+}
+
+poll();
+setInterval(poll, 10000);
+</script>
+</body>
+</html>
