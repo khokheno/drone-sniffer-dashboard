@@ -164,7 +164,13 @@ function render(d) {
   }
 
   const ageMs = d.serverUpdatedAt ? (Date.now() - d.serverUpdatedAt) : null;
-  if (ageMs !== null && ageMs > STALE_AFTER_MS) {
+  if (ageMs === null) {
+    // No server timestamp on this record at all — either it predates
+    // this check being added, or something's wrong. Either way, we
+    // genuinely can't verify freshness, so don't default to "OK".
+    banner.className = 'stale';
+    banner.textContent = 'Cannot verify freshness — this data has no timestamp (waiting for a fresh push from the device).';
+  } else if (ageMs > STALE_AFTER_MS) {
     banner.className = 'stale';
     const ageMin = Math.floor(ageMs / 60000);
     banner.textContent = 'Device appears offline — last update was ' +
@@ -223,11 +229,11 @@ function render(d) {
   }
 
   document.getElementById('lastUpdated').textContent = 'Device uptime at last push: ' + Math.floor((d.updatedAtMs || 0) / 1000) + 's';
-  if (ageMs === null || ageMs <= STALE_AFTER_MS) {
+  if (ageMs !== null && ageMs <= STALE_AFTER_MS) {
     banner.className = 'ok';
     banner.textContent = 'Connected — receiving live data from the device.';
   }
-  // else: the offline banner set above stays in place.
+  // else: the stale/offline banner set above stays in place.
 }
 
 // Re-check staleness on our own timer, independent of new Firebase
