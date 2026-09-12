@@ -179,6 +179,9 @@ function render(d) {
   }
 
   const sc = document.getElementById('snifferGpsCard');
+  const satLine = d.snifferGps
+    ? `<div class="row" style="color:#888">Satellites: ${d.snifferGps.satellitesInView ?? 0} in view, ${d.snifferGps.satellitesUsed ?? 0} used</div>`
+    : '';
   if (d.snifferGps && d.snifferGps.valid) {
     const liveBadge = d.snifferGps.isLive
       ? '<span class="badge sniffer">Sniffer (live)</span>'
@@ -192,7 +195,9 @@ function render(d) {
       <div class="row">Alt: ${d.snifferGps.alt} m</div>
       <div class="row">${mapLink(d.snifferGps.lat, d.snifferGps.lon)}</div>
       <div class="row" style="color:#888">As of ${d.snifferGps.lastFixUtc || '?'}</div>` +
-      ageLine;
+      ageLine + satLine;
+  } else if (d.snifferGps && d.snifferGps.gnssPowered) {
+    sc.innerHTML = '<span class="none">Searching for GPS fix...</span>' + satLine;
   } else {
     sc.innerHTML = '<span class="none">No sniffer GPS fix yet</span>';
   }
