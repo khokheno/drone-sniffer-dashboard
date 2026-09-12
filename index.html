@@ -180,12 +180,19 @@ function render(d) {
 
   const sc = document.getElementById('snifferGpsCard');
   if (d.snifferGps && d.snifferGps.valid) {
-    sc.innerHTML = `<span class="badge sniffer">Sniffer</span>
-      <div class="row">Lat: ${d.snifferGps.lat}</div>
+    const liveBadge = d.snifferGps.isLive
+      ? '<span class="badge sniffer">Sniffer (live)</span>'
+      : '<span class="badge" style="background:#555">Sniffer (last known)</span>';
+    const ageLine = d.snifferGps.isLive
+      ? `<div class="row" style="color:#888">Fix age ${ago(d.snifferGps.ageSec || 0)}</div>`
+      : '';
+    sc.innerHTML = liveBadge +
+      `<div class="row">Lat: ${d.snifferGps.lat}</div>
       <div class="row">Lon: ${d.snifferGps.lon}</div>
       <div class="row">Alt: ${d.snifferGps.alt} m</div>
       <div class="row">${mapLink(d.snifferGps.lat, d.snifferGps.lon)}</div>
-      <div class="row" style="color:#888">Fix age ${ago(d.snifferGps.ageSec || 0)}</div>`;
+      <div class="row" style="color:#888">As of ${d.snifferGps.lastFixUtc || '?'}</div>` +
+      ageLine;
   } else {
     sc.innerHTML = '<span class="none">No sniffer GPS fix yet</span>';
   }
