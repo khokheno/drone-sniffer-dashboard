@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Drone Sniffer — Live Dashboard</title>
 <style>
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#111;color:#eee;margin:0;padding:16px;min-height:100vh;box-sizing:border-box;}
@@ -90,18 +93,43 @@ const loginScreen = document.getElementById('loginScreen');
 const dashboard = document.getElementById('dashboard');
 const loginError = document.getElementById('loginError');
 
+// Firebase Auth's own sign-in persists indefinitely across browser
+// restarts by default (it silently refreshes tokens in the background).
+// This layer adds an actual session expiry on top of that: 8 hours
+// after signing in, the page forces a sign-out, matching a reasonable
+// "shared/mobile device" session length. It's enforced client-side via
+// localStorage, so it's about session hygiene (auto-lock an idle tab),
+// not a substitute for the real access control (which is still the
+// login + database rules) — someone with direct API access and a valid
+// token isn't stopped by this, but that's true of session timers in
+// general on the web.
+const SESSION_MAX_AGE_MS = 8 * 60 * 60 * 1000;
+let sessionCheckTimer = null;
+
+function sessionExpired() {
+  const start = parseInt(localStorage.getItem('sessionStart') || '0', 10);
+  return !start || (Date.now() - start) > SESSION_MAX_AGE_MS;
+}
+
+function clearSession() {
+  localStorage.removeItem('sessionStart');
+  if (sessionCheckTimer) { clearInterval(sessionCheckTimer); sessionCheckTimer = null; }
+}
+
 document.getElementById('loginBtn').addEventListener('click', async () => {
   loginError.textContent = '';
   const email = document.getElementById('loginEmail').value.trim();
   const password = document.getElementById('loginPassword').value;
   try {
     await firebase.auth().signInWithEmailAndPassword(email, password);
+    localStorage.setItem('sessionStart', String(Date.now()));
   } catch (e) {
     loginError.textContent = 'Sign-in failed: ' + e.message;
   }
 });
 
 document.getElementById('logoutBtn').addEventListener('click', () => {
+  clearSession();
   firebase.auth().signOut();
 });
 
@@ -170,6 +198,28 @@ function render(d) {
 let dbRef = null;
 firebase.auth().onAuthStateChanged(user => {
   if (user) {
+    if (sessionExpired()) {
+      // Signed in with Firebase (persisted from a previous visit) but
+      // past our 8-hour window — force a fresh login instead.
+      clearSession();
+      firebase.auth().signOut();
+      return;
+    }
+    // Session exists but we have no local start time recorded (e.g. it
+    // predates this feature, or localStorage was cleared) — start the
+    // clock now rather than immediately kicking the user out.
+    if (!localStorage.getItem('sessionStart')) {
+      localStorage.setItem('sessionStart', String(Date.now()));
+    }
+    if (!sessionCheckTimer) {
+      sessionCheckTimer = setInterval(() => {
+        if (sessionExpired()) {
+          clearSession();
+          firebase.auth().signOut();
+        }
+      }, 5 * 60 * 1000);  // re-check every 5 minutes so a long-open tab still gets logged out
+    }
+
     loginScreen.hidden = true;
     dashboard.hidden = false;
     if (!dbRef) {
