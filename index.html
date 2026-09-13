@@ -143,6 +143,22 @@ function mapLink(lat, lon) {
   return `<a class="maplink" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}">View on map ↗</a>`;
 }
 
+// The device reports GPS fix time as a plain "YYYY-MM-DD HH:MM:SS UTC"
+// string. Convert it to the VIEWER's own local time rather than
+// hardcoding any particular timezone — this way it's correct for
+// whoever's looking at the page, and keeps working correctly across
+// DST changes without needing an update.
+function formatLocalTime(utcStr) {
+  if (!utcStr) return '?';
+  const iso = utcStr.replace(' ', 'T').replace(' UTC', 'Z');
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return utcStr;  // fall back to raw string if parsing ever fails
+  return d.toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
+}
+
 // Firebase's live listener only fires when the underlying data
 // CHANGES — if the device goes offline, no new snapshot ever arrives,
 // so the page would otherwise keep showing whatever the last
@@ -220,7 +236,7 @@ function render(d) {
       <div class="row">Lon: ${d.snifferGps.lon}</div>
       <div class="row">Alt: ${d.snifferGps.alt} m</div>
       <div class="row">${mapLink(d.snifferGps.lat, d.snifferGps.lon)}</div>
-      <div class="row" style="color:#888">As of ${d.snifferGps.lastFixUtc || '?'}</div>` +
+      <div class="row" style="color:#888">As of ${formatLocalTime(d.snifferGps.lastFixUtc)}</div>` +
       ageLine + satLine;
   } else if (d.snifferGps && d.snifferGps.gnssPowered) {
     sc.innerHTML = '<span class="none">Searching for GPS fix...</span>' + satLine;
