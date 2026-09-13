@@ -68,6 +68,7 @@
   <div class="card"><div style="color:#888;font-size:0.85em;margin-bottom:8px;">Location History (last 10)</div><div id="gpsHistoryList"><span class="none">No fixes recorded yet</span></div></div>
 
   <div id="lastUpdated"></div>
+  <div id="versionLine" style="text-align:center;color:#888;font-size:0.8em;margin-top:10px;">Firmware v?</div>
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
@@ -197,6 +198,11 @@ function render(d) {
   document.getElementById('beacons').textContent = d.beacons ?? '-';
   document.getElementById('vendorIEs').textContent = d.vendorIEs ?? '-';
   document.getElementById('unknownOUIs').textContent = d.unknownOUIs ?? '-';
+
+  if (d.firmwareVersion) {
+    document.getElementById('versionLine').textContent = 'Firmware v' + d.firmwareVersion +
+      (d.lastOtaVersion ? ' · Last OTA: ' + formatLocalTime(d.lastOtaTime) + ' → v' + d.lastOtaVersion : ' · No OTA update yet');
+  }
 
   const dc = document.getElementById('droneCard');
   if (d.drone && d.drone.valid) {
