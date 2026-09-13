@@ -65,6 +65,7 @@
   <div class="card" id="droneCard"><span class="none">No drone detected yet</span></div>
   <div class="card" id="operatorCard"><span class="none">No operator location yet</span></div>
   <div class="card" id="snifferGpsCard"><span class="none">No sniffer GPS fix yet</span></div>
+  <div class="card"><div style="color:#888;font-size:0.85em;margin-bottom:8px;">Location History (last 10)</div><div id="gpsHistoryList"><span class="none">No fixes recorded yet</span></div></div>
 
   <div id="lastUpdated"></div>
 </div>
@@ -242,6 +243,15 @@ function render(d) {
     sc.innerHTML = '<span class="none">Searching for GPS fix...</span>' + satLine;
   } else {
     sc.innerHTML = '<span class="none">No sniffer GPS fix yet</span>';
+  }
+
+  const histEl = document.getElementById('gpsHistoryList');
+  if (d.snifferGps && d.snifferGps.history && d.snifferGps.history.length > 0) {
+    histEl.innerHTML = d.snifferGps.history.map(h =>
+      `<div class="row" style="border-bottom:1px solid #333;padding:4px 0;">${formatLocalTime(h.utc)} — ${h.lat.toFixed(6)}, ${h.lon.toFixed(6)} (${h.alt.toFixed(1)} m) ${mapLink(h.lat, h.lon)}</div>`
+    ).join('');
+  } else {
+    histEl.innerHTML = '<span class="none">No fixes recorded yet</span>';
   }
 
   document.getElementById('lastUpdated').textContent = 'Device uptime at last push: ' + Math.floor((d.updatedAtMs || 0) / 1000) + 's';
