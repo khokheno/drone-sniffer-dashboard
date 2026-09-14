@@ -90,6 +90,10 @@ firebase.initializeApp({
 // segment, now layered underneath a real login rather than being the
 // only protection.
 const DEVICE_PATH = "devices/3a774835207cfb2cb587a26af3ed84b69e6efc10/status";
+// Permanent, per-fix location records (survive device reboots) — separate
+// from status.snifferGps.history, which is only the device's in-memory
+// ring buffer since its last boot.
+const HISTORY_PATH = "devices/3a774835207cfb2cb587a26af3ed84b69e6efc10/locationHistory";
 
 const loginScreen = document.getElementById('loginScreen');
 const dashboard = document.getElementById('dashboard');
@@ -172,6 +176,21 @@ function formatLocalTime(utcStr) {
 const STALE_AFTER_MS = 150 * 1000;  // 2.5x the device's 60s push interval
 let lastReceivedData = null;
 
+// locationHistory entries are permanent (device-side), keyed chronologically
+// as "YYYYMMDDTHHMMSSZ" — Firebase's orderByKey/limitToLast query already
+// returns them oldest-first, so just reverse for most-recent-first display.
+function renderHistory(historyObj) {
+  const histEl = document.getElementById('gpsHistoryList');
+  const entries = historyObj ? Object.values(historyObj).reverse() : [];
+  if (entries.length > 0) {
+    histEl.innerHTML = entries.map(h =>
+      `<div class="row" style="border-bottom:1px solid #333;padding:4px 0;">${formatLocalTime(h.utc)} — ${h.lat.toFixed(6)}, ${h.lon.toFixed(6)} (${h.alt.toFixed(1)} m) ${mapLink(h.lat, h.lon)}</div>`
+    ).join('');
+  } else {
+    histEl.innerHTML = '<span class="none">No fixes recorded yet</span>';
+  }
+}
+
 function render(d) {
   lastReceivedData = d;
   const banner = document.getElementById('connBanner');
@@ -251,14 +270,6 @@ function render(d) {
     sc.innerHTML = '<span class="none">No sniffer GPS fix yet</span>';
   }
 
-  const histEl = document.getElementById('gpsHistoryList');
-  if (d.snifferGps && d.snifferGps.history && d.snifferGps.history.length > 0) {
-    histEl.innerHTML = d.snifferGps.history.map(h =>
-      `<div class="row" style="border-bottom:1px solid #333;padding:4px 0;">${formatLocalTime(h.utc)} — ${h.lat.toFixed(6)}, ${h.lon.toFixed(6)} (${h.alt.toFixed(1)} m) ${mapLink(h.lat, h.lon)}</div>`
-    ).join('');
-  } else {
-    histEl.innerHTML = '<span class="none">No fixes recorded yet</span>';
-  }
 
   document.getElementById('lastUpdated').textContent = 'Device uptime at last push: ' + Math.floor((d.updatedAtMs || 0) / 1000) + 's';
   if (ageMs !== null && ageMs <= STALE_AFTER_MS) {
@@ -275,6 +286,7 @@ function render(d) {
 setInterval(() => { if (lastReceivedData) render(lastReceivedData); }, 15000);
 
 let dbRef = null;
+let historyRef = null;
 firebase.auth().onAuthStateChanged(user => {
   if (user) {
     if (sessionExpired()) {
@@ -310,6 +322,8 @@ firebase.auth().onAuthStateChanged(user => {
             banner.className = 'error';
             banner.textContent = 'Could not reach the telemetry backend: ' + err.message;
           });
+        historyRef = firebase.database().ref(HISTORY_PATH).orderByKey().limitToLast(10);
+        historyRef.on('value', snap => renderHistory(snap.val()));
       } catch (e) {
         const banner = document.getElementById('connBanner');
         banner.className = 'error';
@@ -320,6 +334,7 @@ firebase.auth().onAuthStateChanged(user => {
     loginScreen.hidden = false;
     dashboard.hidden = true;
     if (dbRef) { dbRef.off(); dbRef = null; }
+    if (historyRef) { historyRef.off(); historyRef = null; }
   }
 });
 </script>
