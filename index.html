@@ -25,6 +25,11 @@
   #connBanner.stale{background:#530;color:#fc8;}
   #connBanner.error{background:#500;color:#f88;}
   #lastUpdated{font-size:0.75em;color:#666;margin-top:10px;}
+  #mapCard{padding:0;overflow:hidden;}
+  #map{height:320px;width:100%;background:#1c1c1c;}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;padding:10px 14px;font-size:0.8em;color:#aaa;border-top:1px solid #2a2a2a;}
+  .legend span{display:inline-flex;align-items:center;gap:5px;}
+  .legend i{width:10px;height:10px;border-radius:50%;display:inline-block;}
 
   #loginScreen{max-width:340px;margin:15vh auto 0;text-align:center;}
   #loginScreen h1{font-size:1.4em;}
@@ -56,6 +61,15 @@
 
   <div id="connBanner" class="stale">Loading...</div>
 
+  <div class="card" id="mapCard">
+    <div id="map"></div>
+    <div class="legend">
+      <span><i style="background:#2b6;"></i> Drone</span>
+      <span><i style="background:#28c;"></i> Operator</span>
+      <span><i style="background:#a62;"></i> Sniffer</span>
+    </div>
+  </div>
+
   <div class="card">
     <div class="stat"><span>Beacons seen</span><span id="beacons">-</span></div>
     <div class="stat"><span>Vendor IEs</span><span id="vendorIEs">-</span></div>
@@ -71,6 +85,8 @@
   <div id="versionLine" style="text-align:center;color:#888;font-size:0.8em;margin-top:10px;">Firmware v?</div>
 </div>
 
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
@@ -147,6 +163,59 @@ function ago(sec) {
 
 function mapLink(lat, lon) {
   return `<a class="maplink" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}">View on map ↗</a>`;
+}
+
+// Overview map (free OpenStreetMap tiles via Leaflet, no API key) showing
+// drone / operator / sniffer as distinct colored markers, in addition to
+// the existing per-card text + "View on map" links above.
+let leafletMap = null;
+const mapMarkers = { drone: null, operator: null, sniffer: null };
+const MARKER_COLORS = { drone: '#2b6', operator: '#28c', sniffer: '#a62' };
+
+function ensureMap() {
+  if (leafletMap) return;
+  leafletMap = L.map('map', { attributionControl: true }).setView([20, 0], 2);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(leafletMap);
+  // The map container is created while #dashboard is still `hidden`
+  // (display:none), so Leaflet can't measure its size correctly at
+  // construction time — fix it up once it's actually visible.
+  setTimeout(() => leafletMap.invalidateSize(), 100);
+}
+
+function setMapMarker(key, lat, lon, label) {
+  if (lat == null || lon == null || isNaN(lat) || isNaN(lon)) { clearMapMarker(key); return; }
+  ensureMap();
+  if (mapMarkers[key]) {
+    mapMarkers[key].setLatLng([lat, lon]);
+  } else {
+    mapMarkers[key] = L.circleMarker([lat, lon], {
+      radius: 9, color: MARKER_COLORS[key], fillColor: MARKER_COLORS[key], fillOpacity: 0.85, weight: 2
+    }).addTo(leafletMap);
+  }
+  mapMarkers[key].bindTooltip(label, { direction: 'top', offset: [0, -8] });
+  updateMapView();
+}
+
+function clearMapMarker(key) {
+  if (mapMarkers[key] && leafletMap) {
+    leafletMap.removeLayer(mapMarkers[key]);
+    mapMarkers[key] = null;
+    updateMapView();
+  }
+}
+
+function updateMapView() {
+  if (!leafletMap) return;
+  const pts = Object.values(mapMarkers).filter(Boolean).map(m => m.getLatLng());
+  if (pts.length === 0) return;
+  if (pts.length === 1) {
+    leafletMap.setView(pts[0], 16);
+  } else {
+    leafletMap.fitBounds(L.latLngBounds(pts), { padding: [30, 30], maxZoom: 17 });
+  }
 }
 
 // The device reports GPS fix time as a plain "YYYY-MM-DD HH:MM:SS UTC"
@@ -231,8 +300,10 @@ function render(d) {
       <div class="row">Alt: ${d.drone.alt} m</div>
       <div class="row">${mapLink(d.drone.lat, d.drone.lon)}</div>
       <div class="row" style="color:#888">Last seen ${ago(d.drone.ageSec || 0)}</div>`;
+    setMapMarker('drone', d.drone.lat, d.drone.lon, 'Drone' + (d.drone.id ? ': ' + d.drone.id : ''));
   } else {
     dc.innerHTML = '<span class="none">No drone detected yet</span>';
+    clearMapMarker('drone');
   }
 
   const oc = document.getElementById('operatorCard');
@@ -242,8 +313,10 @@ function render(d) {
       <div class="row">Lon: ${d.operator.lon}</div>
       <div class="row">${mapLink(d.operator.lat, d.operator.lon)}</div>
       <div class="row" style="color:#888">Last seen ${ago(d.operator.ageSec || 0)}</div>`;
+    setMapMarker('operator', d.operator.lat, d.operator.lon, 'Operator');
   } else {
     oc.innerHTML = '<span class="none">No operator location yet</span>';
+    clearMapMarker('operator');
   }
 
   const sc = document.getElementById('snifferGpsCard');
@@ -264,10 +337,14 @@ function render(d) {
       <div class="row">${mapLink(d.snifferGps.lat, d.snifferGps.lon)}</div>
       <div class="row" style="color:#888">As of ${formatLocalTime(d.snifferGps.lastFixUtc)}</div>` +
       ageLine + satLine;
+    setMapMarker('sniffer', d.snifferGps.lat, d.snifferGps.lon,
+      'Sniffer' + (d.snifferGps.isLive ? ' (live)' : ' (last known)'));
   } else if (d.snifferGps && d.snifferGps.gnssPowered) {
     sc.innerHTML = '<span class="none">Searching for GPS fix...</span>' + satLine;
+    clearMapMarker('sniffer');
   } else {
     sc.innerHTML = '<span class="none">No sniffer GPS fix yet</span>';
+    clearMapMarker('sniffer');
   }
 
 
@@ -313,6 +390,7 @@ firebase.auth().onAuthStateChanged(user => {
 
     loginScreen.hidden = true;
     dashboard.hidden = false;
+    ensureMap();
     if (!dbRef) {
       try {
         dbRef = firebase.database().ref(DEVICE_PATH);
